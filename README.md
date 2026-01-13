@@ -177,13 +177,31 @@ This will:
 
 ## Performance
 
-Benchmarks on repetitive data show:
+### Benchmark Results
 
-- Text files: 30-70% compression ratio
-- Source code: 40-80% compression ratio
-- Binary data: Varies widely based on structure
+The Rust implementation **outperforms the C++ reference implementation** by **1.5-3.0x** across all test cases:
 
-Performance is comparable to the C++ implementation for similar inputs.
+| Test Case             | Input Size | C++ Time | Rust Time | Speedup |
+|-----------------------|------------|----------|-----------|---------|
+| Small (repetitive)    | 1KB        | 6.0ms    | 2.0ms     | **3.0x** |
+| Medium (repetitive)   | 100KB      | 122ms    | 76ms      | **1.6x** |
+| Large (repetitive)    | 1MB        | 936ms    | 601ms     | **1.55x** |
+| Source Code           | 38KB       | 50ms     | 32ms      | **1.56x** |
+| Low Repetition        | 66KB       | 86ms     | 37ms      | **2.32x** |
+
+### Compression Ratios
+
+- Highly repetitive text: **0.01-2.24%** (excellent compression)
+- Source code: **20-40%** (good compression)
+- Random/low repetition: **60-70%** (limited compression)
+
+See [BENCHMARK.md](BENCHMARK.md) for detailed analysis.
+
+### Run Benchmarks
+
+```bash
+./benchmark_detailed.sh
+```
 
 ## References
 
