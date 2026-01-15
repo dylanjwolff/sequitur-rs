@@ -236,6 +236,14 @@ mod tests {
     }
 
     #[test]
+    fn test_abab_pattern() {
+        let mut seq = Sequitur::new();
+        seq.extend(vec!['a', 'b', 'a', 'b']);
+        let result: Vec<_> = seq.iter().copied().collect();
+        assert_eq!(result, vec!['a', 'b', 'a', 'b']);
+    }
+
+    #[test]
     fn test_extend() {
         let mut seq = Sequitur::new();
         seq.extend(vec!['a', 'b', 'c']);

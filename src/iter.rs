@@ -65,6 +65,17 @@ impl<'a, T: Hash + Eq + Clone> SequiturIter<'a, T> {
                     None
                 }
             }
+
+            Symbol::DocHead { .. } => {
+                // Skip past DocHead (shouldn't appear in Rule 0, but handle defensively)
+                let next = sequitur.symbols[key].next?;
+                Self::resolve_forward(sequitur, next, stack)
+            }
+
+            Symbol::DocTail => {
+                // End of document (shouldn't appear in Rule 0, but handle defensively)
+                None
+            }
         }
     }
 }

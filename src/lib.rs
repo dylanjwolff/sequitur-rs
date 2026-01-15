@@ -29,6 +29,9 @@
 //! - Memory-efficient using generational indices (SlotMap)
 
 mod digram;
+mod documents;
+mod documents_iter;
+mod documents_ops;
 mod id_gen;
 mod iter;
 mod rule;
@@ -38,5 +41,7 @@ mod symbol;
 #[cfg(test)]
 mod tests;
 
+pub use documents::{DocumentStats, OverallStats, SequiturDocuments};
+pub use documents_iter::DocumentIter;
 pub use iter::SequiturIter;
 pub use sequitur::{CompressionStats, Sequitur};

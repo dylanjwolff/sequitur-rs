@@ -20,9 +20,11 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
             "Digram must be consecutive symbols"
         );
 
-        // Don't create digrams starting/ending with RuleHead/RuleTail
+        // Don't create digrams starting/ending with RuleHead/RuleTail/DocHead/DocTail
         if matches!(self.symbols[first].symbol, Symbol::RuleHead { .. })
             || matches!(self.symbols[second].symbol, Symbol::RuleTail)
+            || matches!(self.symbols[first].symbol, Symbol::DocHead { .. })
+            || matches!(self.symbols[second].symbol, Symbol::DocTail)
         {
             return None;
         }
@@ -37,8 +39,21 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
                 e.insert(first);
                 None
             }
-            Entry::Occupied(e) => {
+            Entry::Occupied(mut e) => {
                 let other_first = *e.get();
+
+                // Check if it's the same digram (pointing to itself)
+                if other_first == first {
+                    return None;
+                }
+
+                // Check if the key is still valid (might have been removed)
+                if !self.symbols.contains_key(other_first) {
+                    // Stale entry, update it
+                    e.insert(first);
+                    return None;
+                }
+
                 let other_second = self.symbols[other_first]
                     .next
                     .expect("Digram first should have next");
@@ -74,7 +89,9 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
     /// preventing removal of duplicate digrams at different locations.
     pub(crate) fn remove_digram_from_index(&mut self, first: DefaultKey) {
         // Don't try to remove invalid digrams
-        if matches!(self.symbols[first].symbol, Symbol::RuleHead { .. }) {
+        if matches!(self.symbols[first].symbol, Symbol::RuleHead { .. })
+            || matches!(self.symbols[first].symbol, Symbol::DocHead { .. })
+        {
             return;
         }
 
@@ -82,7 +99,9 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
             return;
         };
 
-        if matches!(self.symbols[second].symbol, Symbol::RuleTail) {
+        if matches!(self.symbols[second].symbol, Symbol::RuleTail)
+            || matches!(self.symbols[second].symbol, Symbol::DocTail)
+        {
             return;
         }
 

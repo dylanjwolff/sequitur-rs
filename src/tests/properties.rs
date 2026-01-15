@@ -41,6 +41,8 @@ fn get_symbol_id<T>(symbol: &Symbol<T>) -> usize {
         Symbol::RuleRef { rule_id } => (*rule_id as usize) + 1000,
         Symbol::RuleHead { rule_id, .. } => (*rule_id as usize) + 2000,
         Symbol::RuleTail => 3000,
+        Symbol::DocHead { .. } => 4000,
+        Symbol::DocTail => 5000,
     }
 }
 

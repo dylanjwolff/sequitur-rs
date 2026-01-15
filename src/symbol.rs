@@ -22,6 +22,12 @@ pub(crate) enum Symbol<T> {
 
     /// Marks the end of a rule definition.
     RuleTail,
+
+    /// Marks the beginning of a document sequence.
+    DocHead { tail: DefaultKey },
+
+    /// Marks the end of a document sequence.
+    DocTail,
 }
 
 /// A node in the doubly-linked list of symbols.
@@ -70,6 +76,12 @@ impl SymbolHash {
             Symbol::RuleTail => {
                 3u8.hash(&mut hasher);
             }
+            Symbol::DocHead { .. } => {
+                4u8.hash(&mut hasher);
+            }
+            Symbol::DocTail => {
+                5u8.hash(&mut hasher);
+            }
         }
         SymbolHash(hasher.finish())
     }
@@ -93,6 +105,8 @@ impl<T: Clone> Symbol<T> {
                 tail: *tail,
             },
             Symbol::RuleTail => Symbol::RuleTail,
+            Symbol::DocHead { tail } => Symbol::DocHead { tail: *tail },
+            Symbol::DocTail => Symbol::DocTail,
         }
     }
 }
@@ -110,6 +124,8 @@ impl<T: PartialEq> Symbol<T> {
                 Symbol::RuleHead { rule_id: b, .. },
             ) => a == b,
             (Symbol::RuleTail, Symbol::RuleTail) => true,
+            (Symbol::DocHead { .. }, Symbol::DocHead { .. }) => true,
+            (Symbol::DocTail, Symbol::DocTail) => true,
             _ => false,
         }
     }
