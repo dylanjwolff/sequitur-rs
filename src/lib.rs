@@ -61,6 +61,8 @@ mod sequitur;
 mod symbol;
 
 // RLE (Run-Length Encoding) Sequitur modules
+mod rle_documents;
+mod rle_documents_iter;
 mod rle_grammar;
 mod rle_iter;
 mod rle_sequitur;
@@ -75,5 +77,7 @@ pub use iter::SequiturIter;
 pub use sequitur::{CompressionStats, Sequitur};
 
 // RLE exports
+pub use rle_documents::{RleDocumentStats, RleOverallStats, SequiturDocumentsRle};
+pub use rle_documents_iter::RleDocumentIter;
 pub use rle_iter::RleSequiturIter;
 pub use rle_sequitur::{RleCompressionStats, SequiturRle};

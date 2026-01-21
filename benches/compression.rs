@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use sequitur_rs::{Sequitur, SequiturDocuments, SequiturRle};
+use sequitur_rs::{Sequitur, SequiturDocuments, SequiturDocumentsRle, SequiturRle};
 
 /// Generate repetitive text data
 fn generate_repetitive_text(size: usize) -> String {
@@ -359,6 +359,49 @@ fn bench_rle_iteration(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark multi-document compression with RLE
+fn bench_rle_documents(c: &mut Criterion) {
+    let sizes = [1_000, 10_000];
+    let mut group = c.benchmark_group("rle_documents");
+
+    for size in sizes.iter() {
+        // Create test data: multiple documents with shared patterns and runs
+        let doc1: Vec<u8> = generate_long_runs(*size);
+        let doc2: Vec<u8> = generate_long_runs(*size);
+        let doc3: Vec<u8> = generate_difference_sequence(*size);
+
+        group.bench_with_input(
+            BenchmarkId::new("SequiturDocuments", size),
+            &(&doc1, &doc2, &doc3),
+            |b, (d1, d2, d3)| {
+                b.iter(|| {
+                    let mut docs = SequiturDocuments::new();
+                    docs.extend_document(1, black_box(d1.iter().copied()));
+                    docs.extend_document(2, black_box(d2.iter().copied()));
+                    docs.extend_document(3, black_box(d3.iter().copied()));
+                    black_box(docs)
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("SequiturDocumentsRle", size),
+            &(&doc1, &doc2, &doc3),
+            |b, (d1, d2, d3)| {
+                b.iter(|| {
+                    let mut docs = SequiturDocumentsRle::new();
+                    docs.extend_document(1, black_box(d1.iter().copied()));
+                    docs.extend_document(2, black_box(d2.iter().copied()));
+                    docs.extend_document(3, black_box(d3.iter().copied()));
+                    black_box(docs)
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 /// Print compression statistics comparison (not a timed benchmark)
 fn print_compression_stats(c: &mut Criterion) {
     // This benchmark exists just to print compression statistics
@@ -462,6 +505,40 @@ fn print_compression_stats(c: &mut Criterion) {
         );
     }
 
+    // Multi-document comparison
+    eprintln!("\n{:-^80}", " Multi-Document Compression ");
+    eprintln!(
+        "{:<25} {:>10} {:>12} {:>12}",
+        "Config", "Total Input", "Docs Symbols", "RLE Nodes"
+    );
+    eprintln!("{:-<80}", "");
+
+    for size in [1_000, 10_000] {
+        let doc1 = generate_long_runs(size);
+        let doc2 = generate_long_runs(size);
+        let doc3 = generate_difference_sequence(size);
+
+        let mut std_docs = SequiturDocuments::new();
+        std_docs.extend_document(1, doc1.iter().copied());
+        std_docs.extend_document(2, doc2.iter().copied());
+        std_docs.extend_document(3, doc3.iter().copied());
+        let std_stats = std_docs.overall_stats();
+
+        let mut rle_docs = SequiturDocumentsRle::new();
+        rle_docs.extend_document(1, doc1.iter().copied());
+        rle_docs.extend_document(2, doc2.iter().copied());
+        rle_docs.extend_document(3, doc3.iter().copied());
+        let rle_stats = rle_docs.overall_stats();
+
+        eprintln!(
+            "{:<25} {:>10} {:>12} {:>12}",
+            format!("3_docs_{}", size),
+            size * 3,
+            std_stats.total_grammar_symbols,
+            rle_stats.total_grammar_nodes
+        );
+    }
+
     eprintln!("{:=<80}\n", "");
 
     // Dummy benchmark to satisfy criterion
@@ -481,6 +558,7 @@ criterion_group!(
     bench_difference_sequence,
     bench_rle_repetitive_text,
     bench_rle_iteration,
+    bench_rle_documents,
     // Statistics comparison
     print_compression_stats,
 );
