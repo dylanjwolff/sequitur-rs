@@ -38,7 +38,7 @@ fn extract_all_digrams<T: Clone + Eq + std::hash::Hash>(seq: &Sequitur<T>) -> Ve
 #[allow(dead_code)]
 fn get_symbol_id<T>(symbol: &Symbol<T>) -> usize {
     match symbol {
-        Symbol::Value(_) => 0,  // Simplified: all values get same ID for this test
+        Symbol::Value(_) => 0, // Simplified: all values get same ID for this test
         Symbol::RuleRef { rule_id } => (*rule_id as usize) + 1000,
         Symbol::RuleHead { rule_id, .. } => (*rule_id as usize) + 2000,
         Symbol::RuleTail => 3000,
@@ -179,25 +179,23 @@ fn fuzz_no_panic() {
 #[cfg(test)]
 #[test]
 fn fuzz_rule_utility() {
-    bolero::check!()
-        .with_type::<Vec<u8>>()
-        .for_each(|input| {
-            let mut seq = Sequitur::new();
-            seq.extend(input.iter().copied());
+    bolero::check!().with_type::<Vec<u8>>().for_each(|input| {
+        let mut seq = Sequitur::new();
+        seq.extend(input.iter().copied());
 
-            // Check rule utility constraint
-            for (&rule_id, &head_key) in seq.rules() {
-                if rule_id != 0 {
-                    let count = get_rule_count(&seq, head_key);
-                    assert!(
-                        count >= 2,
-                        "Rule {} has count {}, violates rule utility constraint",
-                        rule_id,
-                        count
-                    );
-                }
+        // Check rule utility constraint
+        for (&rule_id, &head_key) in seq.rules() {
+            if rule_id != 0 {
+                let count = get_rule_count(&seq, head_key);
+                assert!(
+                    count >= 2,
+                    "Rule {} has count {}, violates rule utility constraint",
+                    rule_id,
+                    count
+                );
             }
-        });
+        }
+    });
 }
 
 #[cfg(test)]
@@ -210,7 +208,10 @@ mod unit_tests {
         seq.extend(vec!['a', 'b', 'a', 'b']);
 
         // Should create a rule for "ab"
-        assert!(seq.rules().len() >= 2, "Should have created at least one rule");
+        assert!(
+            seq.rules().len() >= 2,
+            "Should have created at least one rule"
+        );
 
         // Verify roundtrip
         let result: Vec<char> = seq.iter().copied().collect();
@@ -240,12 +241,7 @@ mod unit_tests {
         for (&rule_id, &head_key) in seq.rules() {
             if rule_id != 0 {
                 let count = get_rule_count(&seq, head_key);
-                assert!(
-                    count >= 2,
-                    "Rule {} only used {} times",
-                    rule_id,
-                    count
-                );
+                assert!(count >= 2, "Rule {} only used {} times", rule_id, count);
             }
         }
     }

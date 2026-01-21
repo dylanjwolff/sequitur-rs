@@ -9,36 +9,33 @@ fn main() {
 
     docs.extend_document(
         "article1",
-        "The new AI model shows impressive results in natural language processing"
-            .chars(),
+        "The new AI model shows impressive results in natural language processing".chars(),
     );
 
     docs.extend_document(
         "article2",
-        "The new AI technology demonstrates strong performance in language tasks"
-            .chars(),
+        "The new AI technology demonstrates strong performance in language tasks".chars(),
     );
 
     docs.extend_document(
         "article3",
-        "Researchers released the new AI system for processing natural language"
-            .chars(),
+        "Researchers released the new AI system for processing natural language".chars(),
     );
 
     // Print overall statistics
     let stats = docs.overall_stats();
     println!("=== Overall Compression Statistics ===");
-    println!("Total input length: {} characters", stats.total_input_length);
+    println!(
+        "Total input length: {} characters",
+        stats.total_input_length
+    );
     println!(
         "Total grammar symbols: {} symbols",
         stats.total_grammar_symbols
     );
     println!("Shared rules created: {}", stats.num_rules);
     println!("Number of documents: {}", stats.num_documents);
-    println!(
-        "Compression ratio: {:.1}%\n",
-        stats.compression_ratio()
-    );
+    println!("Compression ratio: {:.1}%\n", stats.compression_ratio());
 
     // Print per-document statistics
     println!("=== Per-Document Statistics ===");
@@ -56,23 +53,23 @@ fn main() {
 
     // Decompress individual documents
     println!("\n=== Decompressing Documents ===");
-    let article1: String = docs
-        .iter_document(&"article1")
-        .unwrap()
-        .collect();
-    println!("Article 1 (first 50 chars): {}...", &article1[..50.min(article1.len())]);
+    let article1: String = docs.iter_document(&"article1").unwrap().collect();
+    println!(
+        "Article 1 (first 50 chars): {}...",
+        &article1[..50.min(article1.len())]
+    );
 
-    let article2: String = docs
-        .iter_document(&"article2")
-        .unwrap()
-        .collect();
-    println!("Article 2 (first 50 chars): {}...", &article2[..50.min(article2.len())]);
+    let article2: String = docs.iter_document(&"article2").unwrap().collect();
+    println!(
+        "Article 2 (first 50 chars): {}...",
+        &article2[..50.min(article2.len())]
+    );
 
-    let article3: String = docs
-        .iter_document(&"article3")
-        .unwrap()
-        .collect();
-    println!("Article 3 (first 50 chars): {}...", &article3[..50.min(article3.len())]);
+    let article3: String = docs.iter_document(&"article3").unwrap().collect();
+    println!(
+        "Article 3 (first 50 chars): {}...",
+        &article3[..50.min(article3.len())]
+    );
 
     // Verify round-trip accuracy
     println!("\n=== Verification ===");

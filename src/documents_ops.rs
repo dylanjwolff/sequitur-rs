@@ -248,15 +248,18 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
         self.symbols.remove(second);
 
         // Expand rules in the rule body if necessary
-        let rule_first = self.symbols[rule_head_key].next.expect("RuleHead should have next");
-        let rule_second = self.symbols[rule_first].next.expect("Rule first should have next");
+        let rule_first = self.symbols[rule_head_key]
+            .next
+            .expect("RuleHead should have next");
+        let rule_second = self.symbols[rule_first]
+            .next
+            .expect("Rule first should have next");
 
         self.expand_rule_if_necessary(rule_first);
         self.expand_rule_if_necessary(rule_second);
 
         new_rule_key
     }
-
 
     /// Expands a rule inline if it's only used once.
     pub(crate) fn expand_rule_if_necessary(&mut self, symbol_key: DefaultKey) {
@@ -414,7 +417,12 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
 
     /// Decrements a rule's reference count (without expanding).
     fn decrement_rule_count(&mut self, rule_head_key: DefaultKey) {
-        if let Symbol::RuleHead { rule_id, count, tail } = self.symbols[rule_head_key].symbol {
+        if let Symbol::RuleHead {
+            rule_id,
+            count,
+            tail,
+        } = self.symbols[rule_head_key].symbol
+        {
             assert!(count > 0, "Cannot decrement count below 0");
             self.symbols[rule_head_key].symbol = Symbol::RuleHead {
                 rule_id,
@@ -441,5 +449,4 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
             }
         }
     }
-
 }

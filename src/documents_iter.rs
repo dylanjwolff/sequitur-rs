@@ -16,10 +16,7 @@ impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> DocumentIter<'a, T, Doc
     /// Creates a new iterator for the specified document.
     ///
     /// Returns None if the document doesn't exist.
-    pub(crate) fn new(
-        sequitur: &'a SequiturDocuments<T, DocId>,
-        doc_id: &DocId,
-    ) -> Option<Self> {
+    pub(crate) fn new(sequitur: &'a SequiturDocuments<T, DocId>, doc_id: &DocId) -> Option<Self> {
         // Get document info
         let doc_info = sequitur
             .documents
@@ -85,18 +82,14 @@ impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> DocumentIter<'a, T, Doc
 
                 Symbol::RuleHead { .. } | Symbol::DocHead { .. } => {
                     // Skip past head
-                    key = sequitur.symbols[key]
-                        .next
-                        .expect("Head should have next");
+                    key = sequitur.symbols[key].next.expect("Head should have next");
                 }
             }
         }
     }
 }
 
-impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> Iterator
-    for DocumentIter<'a, T, DocId>
-{
+impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> Iterator for DocumentIter<'a, T, DocId> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -149,11 +142,7 @@ mod tests {
         let mut docs = SequiturDocuments::new();
         docs.extend_document(1, vec!['a', 'b', 'c']);
 
-        let result: Vec<_> = docs
-            .iter_document(&1)
-            .unwrap()
-            .copied()
-            .collect();
+        let result: Vec<_> = docs.iter_document(&1).unwrap().copied().collect();
         assert_eq!(result, vec!['a', 'b', 'c']);
     }
 

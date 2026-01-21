@@ -257,7 +257,10 @@ mod tests {
 
         // Verify structure: RuleHead -> RuleTail
         let head_node = &seq.symbols[rule_0_head];
-        assert!(matches!(head_node.symbol, Symbol::RuleHead { rule_id: 0, .. }));
+        assert!(matches!(
+            head_node.symbol,
+            Symbol::RuleHead { rule_id: 0, .. }
+        ));
 
         let tail_key = head_node.next.expect("Head should have next");
         let tail_node = &seq.symbols[tail_key];

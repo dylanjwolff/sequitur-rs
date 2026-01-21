@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use sequitur_rs::{Sequitur, SequiturDocuments};
 
 /// Generate repetitive text data
@@ -51,17 +51,13 @@ fn bench_sequitur_repetitive(c: &mut Criterion) {
     for size in sizes.iter() {
         let data = generate_repetitive_text(*size);
 
-        group.bench_with_input(
-            BenchmarkId::new("Sequitur", size),
-            &data,
-            |b, data| {
-                b.iter(|| {
-                    let mut seq = Sequitur::new();
-                    seq.extend(black_box(data.chars()));
-                    black_box(seq)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("Sequitur", size), &data, |b, data| {
+            b.iter(|| {
+                let mut seq = Sequitur::new();
+                seq.extend(black_box(data.chars()));
+                black_box(seq)
+            });
+        });
 
         group.bench_with_input(
             BenchmarkId::new("SequiturDocuments", size),
@@ -86,17 +82,13 @@ fn bench_sequitur_source_code(c: &mut Criterion) {
     for size in sizes.iter() {
         let data = generate_source_code(*size);
 
-        group.bench_with_input(
-            BenchmarkId::new("Sequitur", size),
-            &data,
-            |b, data| {
-                b.iter(|| {
-                    let mut seq = Sequitur::new();
-                    seq.extend(black_box(data.chars()));
-                    black_box(seq)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("Sequitur", size), &data, |b, data| {
+            b.iter(|| {
+                let mut seq = Sequitur::new();
+                seq.extend(black_box(data.chars()));
+                black_box(seq)
+            });
+        });
 
         group.bench_with_input(
             BenchmarkId::new("SequiturDocuments", size),
@@ -121,17 +113,13 @@ fn bench_sequitur_low_repetition(c: &mut Criterion) {
     for size in sizes.iter() {
         let data = generate_low_repetition(*size);
 
-        group.bench_with_input(
-            BenchmarkId::new("Sequitur", size),
-            &data,
-            |b, data| {
-                b.iter(|| {
-                    let mut seq = Sequitur::new();
-                    seq.extend(black_box(data.chars()));
-                    black_box(seq)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("Sequitur", size), &data, |b, data| {
+            b.iter(|| {
+                let mut seq = Sequitur::new();
+                seq.extend(black_box(data.chars()));
+                black_box(seq)
+            });
+        });
 
         group.bench_with_input(
             BenchmarkId::new("SequiturDocuments", size),
@@ -163,16 +151,12 @@ fn bench_iteration(c: &mut Criterion) {
         let mut docs = SequiturDocuments::new();
         docs.extend_document(1, data.chars());
 
-        group.bench_with_input(
-            BenchmarkId::new("Sequitur", size),
-            &seq,
-            |b, seq| {
-                b.iter(|| {
-                    let count: usize = black_box(seq.iter().count());
-                    black_box(count)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("Sequitur", size), &seq, |b, seq| {
+            b.iter(|| {
+                let count: usize = black_box(seq.iter().count());
+                black_box(count)
+            });
+        });
 
         group.bench_with_input(
             BenchmarkId::new("SequiturDocuments", size),

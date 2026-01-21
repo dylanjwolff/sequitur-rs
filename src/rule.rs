@@ -66,9 +66,9 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
         let rule_first = self
             .symbols
             .insert(SymbolNode::new(self.symbols[match1].symbol.clone_symbol()));
-        let rule_second = self
-            .symbols
-            .insert(SymbolNode::new(self.symbols[match1_second].symbol.clone_symbol()));
+        let rule_second = self.symbols.insert(SymbolNode::new(
+            self.symbols[match1_second].symbol.clone_symbol(),
+        ));
 
         // Link rule structure: head -> first -> second -> tail
         self.symbols[head_key].next = Some(rule_first);

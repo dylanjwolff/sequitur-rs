@@ -119,10 +119,7 @@ impl<T: PartialEq> Symbol<T> {
         match (self, other) {
             (Symbol::Value(a), Symbol::Value(b)) => a == b,
             (Symbol::RuleRef { rule_id: a }, Symbol::RuleRef { rule_id: b }) => a == b,
-            (
-                Symbol::RuleHead { rule_id: a, .. },
-                Symbol::RuleHead { rule_id: b, .. },
-            ) => a == b,
+            (Symbol::RuleHead { rule_id: a, .. }, Symbol::RuleHead { rule_id: b, .. }) => a == b,
             (Symbol::RuleTail, Symbol::RuleTail) => true,
             (Symbol::DocHead { .. }, Symbol::DocHead { .. }) => true,
             (Symbol::DocTail, Symbol::DocTail) => true,
