@@ -117,7 +117,7 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
     /// # Example
     ///
     /// ```rust
-    /// use sequitur::SequiturDocuments;
+    /// use sequitur_rs::SequiturDocuments;
     ///
     /// let mut docs = SequiturDocuments::new();
     /// docs.extend_document("doc1", vec!['a', 'b', 'c']);

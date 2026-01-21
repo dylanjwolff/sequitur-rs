@@ -29,22 +29,22 @@ pub(crate) struct DocumentInfo {
 /// # Example
 ///
 /// ```rust
-/// use sequitur::SequiturDocuments;
+/// use sequitur_rs::SequiturDocuments;
 ///
-/// let mut docs = SequiturDocuments::<char, &str>::new();
+/// let mut docs = SequiturDocuments::<char, String>::new();
 ///
 /// // Add multiple related articles
-/// docs.push_to_document("article1", 'T');
-/// docs.push_to_document("article1", 'h');
-/// docs.push_to_document("article1", 'e');
+/// docs.push_to_document("article1".to_string(), 'T');
+/// docs.push_to_document("article1".to_string(), 'h');
+/// docs.push_to_document("article1".to_string(), 'e');
 ///
-/// docs.push_to_document("article2", 'T');
-/// docs.push_to_document("article2", 'h');
-/// docs.push_to_document("article2", 'e');
+/// docs.push_to_document("article2".to_string(), 'T');
+/// docs.push_to_document("article2".to_string(), 'h');
+/// docs.push_to_document("article2".to_string(), 'e');
 ///
 /// // Grammar is shared, each document can be iterated independently
-/// let text1: String = docs.iter_document("article1").unwrap().collect();
-/// let text2: String = docs.iter_document("article2").unwrap().collect();
+/// let text1: String = docs.iter_document(&"article1".to_string()).unwrap().collect();
+/// let text2: String = docs.iter_document(&"article2".to_string()).unwrap().collect();
 /// ```
 pub struct SequiturDocuments<T, DocId> {
     /// Storage for all symbols using generational indices
@@ -92,7 +92,7 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
     /// # Example
     ///
     /// ```rust
-    /// use sequitur::SequiturDocuments;
+    /// use sequitur_rs::SequiturDocuments;
     ///
     /// let mut docs = SequiturDocuments::<char, u32>::new();
     /// docs.push_to_document(1, 'a');
