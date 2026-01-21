@@ -5,26 +5,40 @@ use slotmap::{DefaultKey, SlotMap};
 use std::collections::hash_map::Entry;
 use std::hash::Hash;
 
-/// A bundle of mutable references to all grammar fields.
+/// Core grammar storage shared between Sequitur and SequiturDocuments.
 ///
-/// This struct enables simultaneous mutable access to different fields,
-/// working around Rust's borrow checker limitations with trait methods.
-/// The algorithm is implemented as methods on this struct.
-pub(crate) struct GrammarFields<'a, T> {
-    pub symbols: &'a mut SlotMap<DefaultKey, SymbolNode<T>>,
-    pub digram_index: &'a mut HashMap<(SymbolHash, SymbolHash), DefaultKey>,
-    pub rule_index: &'a mut HashMap<u32, DefaultKey>,
-    pub id_gen: &'a mut IdGenerator,
+/// Contains all the common state needed for the Sequitur algorithm:
+/// - Symbol storage (doubly-linked list nodes)
+/// - Digram index for detecting repeated pairs
+/// - Rule index for looking up rule definitions
+/// - ID generator for creating new rule IDs
+pub(crate) struct Grammar<T> {
+    /// Storage for all symbols using generational indices
+    pub symbols: SlotMap<DefaultKey, SymbolNode<T>>,
+
+    /// Maps digrams to their first occurrence
+    pub digram_index: HashMap<(SymbolHash, SymbolHash), DefaultKey>,
+
+    /// Maps rule IDs to their RuleHead keys
+    pub rule_index: HashMap<u32, DefaultKey>,
+
+    /// ID generator with reuse
+    pub id_gen: IdGenerator,
 }
 
-/// Trait for types that provide grammar storage.
-///
-/// This trait enables zero-cost code sharing between Sequitur and SequiturDocuments.
-pub(crate) trait GrammarOps<T> {
-    fn fields(&mut self) -> GrammarFields<'_, T>;
+impl<T> Grammar<T> {
+    /// Creates a new empty grammar.
+    pub fn new() -> Self {
+        Self {
+            symbols: SlotMap::new(),
+            digram_index: HashMap::default(),
+            rule_index: HashMap::default(),
+            id_gen: IdGenerator::new(),
+        }
+    }
 }
 
-impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
+impl<T: Hash + Eq + Clone> Grammar<T> {
     // ========================================================================
     // Digram Operations
     // ========================================================================
@@ -44,8 +58,8 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
         );
 
         // Don't create digrams starting/ending with sentinel nodes
-        if is_sequence_start(&self.symbols[first].symbol)
-            || is_sequence_end(&self.symbols[second].symbol)
+        if self.is_sequence_start(&self.symbols[first].symbol)
+            || self.is_sequence_end(&self.symbols[second].symbol)
         {
             return None;
         }
@@ -106,7 +120,7 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
     #[inline]
     pub fn remove_digram_from_index(&mut self, first: DefaultKey) {
         // Don't try to remove invalid digrams
-        if is_sequence_start(&self.symbols[first].symbol) {
+        if self.is_sequence_start(&self.symbols[first].symbol) {
             return;
         }
 
@@ -114,7 +128,7 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
             return;
         };
 
-        if is_sequence_end(&self.symbols[second].symbol) {
+        if self.is_sequence_end(&self.symbols[second].symbol) {
             return;
         }
 
@@ -183,10 +197,6 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
 
         let match1_second = self.symbols[match1].next.unwrap();
 
-        // Clone the symbols we need before mutating
-        let first_symbol = self.symbols[match1].symbol.clone_symbol();
-        let second_symbol = self.symbols[match1_second].symbol.clone_symbol();
-
         // Create new rule
         let rule_id = self.id_gen.get();
 
@@ -200,9 +210,13 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
             tail: tail_key,
         }));
 
-        // Insert the cloned symbols into the rule
-        let rule_first = self.symbols.insert(SymbolNode::new(first_symbol));
-        let rule_second = self.symbols.insert(SymbolNode::new(second_symbol));
+        // Clone the digram symbols into the rule
+        let rule_first = self
+            .symbols
+            .insert(SymbolNode::new(self.symbols[match1].symbol.clone_symbol()));
+        let rule_second = self.symbols.insert(SymbolNode::new(
+            self.symbols[match1_second].symbol.clone_symbol(),
+        ));
 
         // Link rule structure: head -> first -> second -> tail
         self.symbols[head_key].next = Some(rule_first);
@@ -388,14 +402,14 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
 
         // Check new digrams formed
         if let Some(prev) = before_rule {
-            if !is_sequence_start(&self.symbols[prev].symbol) {
+            if !self.is_sequence_start(&self.symbols[prev].symbol) {
                 self.link_made(prev);
             }
         }
 
         // Check digram at rule_last if valid
         if let Some(after) = after_rule {
-            if !is_sequence_end(&self.symbols[after].symbol) {
+            if !self.is_sequence_end(&self.symbols[after].symbol) {
                 self.link_made(rule_last);
             }
         }
@@ -429,7 +443,6 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
     }
 
     /// Checks newly formed links after rule insertion.
-    #[inline]
     pub fn check_new_links(&mut self, rule_key: DefaultKey) {
         // Check if key is still valid
         if !self.symbols.contains_key(rule_key) {
@@ -438,7 +451,7 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
 
         // Check digram before rule_key
         if let Some(prev) = self.symbols[rule_key].prev {
-            if !is_sequence_start(&self.symbols[prev].symbol) {
+            if !self.is_sequence_start(&self.symbols[prev].symbol) {
                 self.link_made(prev);
             }
         }
@@ -450,8 +463,8 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
 
         // Check digram starting at rule_key
         if let Some(next) = self.symbols[rule_key].next {
-            if !is_sequence_end(&self.symbols[next].symbol)
-                && !is_sequence_start(&self.symbols[rule_key].symbol)
+            if !self.is_sequence_end(&self.symbols[next].symbol)
+                && !self.is_sequence_start(&self.symbols[rule_key].symbol)
             {
                 self.link_made(rule_key);
             }
@@ -459,12 +472,11 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
     }
 
     /// Checks newly formed links after two rule insertions.
-    #[inline]
     pub fn check_new_links_pair(&mut self, rule1: DefaultKey, rule2: DefaultKey) {
         // Check at rule1
         if let Some(next) = self.symbols[rule1].next {
-            if !is_sequence_end(&self.symbols[next].symbol)
-                && !is_sequence_start(&self.symbols[rule1].symbol)
+            if !self.is_sequence_end(&self.symbols[next].symbol)
+                && !self.is_sequence_start(&self.symbols[rule1].symbol)
             {
                 self.link_made(rule1);
             }
@@ -472,8 +484,8 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
 
         // Check at rule2
         if let Some(next) = self.symbols[rule2].next {
-            if !is_sequence_end(&self.symbols[next].symbol)
-                && !is_sequence_start(&self.symbols[rule2].symbol)
+            if !self.is_sequence_end(&self.symbols[next].symbol)
+                && !self.is_sequence_start(&self.symbols[rule2].symbol)
             {
                 self.link_made(rule2);
             }
@@ -481,14 +493,14 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
 
         // Check before rule2
         if let Some(prev) = self.symbols[rule2].prev {
-            if prev != rule1 && !is_sequence_start(&self.symbols[prev].symbol) {
+            if prev != rule1 && !self.is_sequence_start(&self.symbols[prev].symbol) {
                 self.link_made(prev);
             }
         }
 
         // Check before rule1
         if let Some(prev) = self.symbols[rule1].prev {
-            if prev != rule2 && !is_sequence_start(&self.symbols[prev].symbol) {
+            if prev != rule2 && !self.is_sequence_start(&self.symbols[prev].symbol) {
                 self.link_made(prev);
             }
         }
@@ -497,6 +509,18 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
     // ========================================================================
     // Helper methods
     // ========================================================================
+
+    /// Checks if a symbol marks the start of a sequence (RuleHead or DocHead).
+    #[inline]
+    fn is_sequence_start(&self, symbol: &Symbol<T>) -> bool {
+        matches!(symbol, Symbol::RuleHead { .. } | Symbol::DocHead { .. })
+    }
+
+    /// Checks if a symbol marks the end of a sequence (RuleTail or DocTail).
+    #[inline]
+    fn is_sequence_end(&self, symbol: &Symbol<T>) -> bool {
+        matches!(symbol, Symbol::RuleTail | Symbol::DocTail)
+    }
 
     /// Increments the count of a rule if the symbol is a RuleRef.
     #[inline]
@@ -554,14 +578,8 @@ impl<'a, T: Hash + Eq + Clone> GrammarFields<'a, T> {
     }
 }
 
-/// Checks if a symbol marks the start of a sequence (RuleHead or DocHead).
-#[inline(always)]
-pub(crate) fn is_sequence_start<T>(symbol: &Symbol<T>) -> bool {
-    matches!(symbol, Symbol::RuleHead { .. } | Symbol::DocHead { .. })
-}
-
-/// Checks if a symbol marks the end of a sequence (RuleTail or DocTail).
-#[inline(always)]
-pub(crate) fn is_sequence_end<T>(symbol: &Symbol<T>) -> bool {
-    matches!(symbol, Symbol::RuleTail | Symbol::DocTail)
+impl<T> Default for Grammar<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
