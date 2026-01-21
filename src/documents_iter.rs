@@ -1,4 +1,5 @@
 use crate::documents::SequiturDocuments;
+use crate::grammar::Grammar;
 use crate::symbol::Symbol;
 use slotmap::DefaultKey;
 use std::hash::Hash;
@@ -7,9 +8,10 @@ use std::hash::Hash;
 ///
 /// Expands RuleRefs recursively using a stack to reconstruct the original sequence.
 pub struct DocumentIter<'a, T, DocId> {
-    sequitur: &'a SequiturDocuments<T, DocId>,
+    grammar: &'a Grammar<T>,
     current: Option<DefaultKey>,
     stack: Vec<DefaultKey>,
+    _doc_id: std::marker::PhantomData<DocId>,
 }
 
 impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> DocumentIter<'a, T, DocId> {
@@ -24,18 +26,19 @@ impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> DocumentIter<'a, T, Doc
             .expect("Document should exist");
 
         // Start from first symbol after DocHead
-        let start = sequitur.symbols[doc_info.head]
+        let start = sequitur.grammar.symbols[doc_info.head]
             .next
             .expect("DocHead should have next");
 
         // Resolve forward through any rules
         let mut stack = Vec::new();
-        let current = Self::resolve_forward(sequitur, start, &mut stack);
+        let current = Self::resolve_forward(&sequitur.grammar, start, &mut stack);
 
         Some(Self {
-            sequitur,
+            grammar: &sequitur.grammar,
             current,
             stack,
+            _doc_id: std::marker::PhantomData,
         })
     }
 
@@ -43,12 +46,12 @@ impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> DocumentIter<'a, T, Doc
     ///
     /// Uses a stack to track positions within rules for proper iteration.
     fn resolve_forward(
-        sequitur: &'a SequiturDocuments<T, DocId>,
+        grammar: &'a Grammar<T>,
         mut key: DefaultKey,
         stack: &mut Vec<DefaultKey>,
     ) -> Option<DefaultKey> {
         loop {
-            match &sequitur.symbols[key].symbol {
+            match &grammar.symbols[key].symbol {
                 Symbol::Value(_) => return Some(key),
 
                 Symbol::RuleRef { rule_id } => {
@@ -56,13 +59,13 @@ impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> DocumentIter<'a, T, Doc
                     stack.push(key);
 
                     // Jump to rule definition
-                    let rule_head = *sequitur
-                        .rules()
+                    let rule_head = *grammar
+                        .rule_index
                         .get(rule_id)
                         .expect("Rule should exist in index");
 
                     // Move to first symbol in rule
-                    key = sequitur.symbols[rule_head]
+                    key = grammar.symbols[rule_head]
                         .next
                         .expect("RuleHead should have next");
                 }
@@ -71,7 +74,7 @@ impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> DocumentIter<'a, T, Doc
                     // End of rule or document, pop from stack
                     if let Some(return_key) = stack.pop() {
                         // Return to position after RuleRef
-                        key = sequitur.symbols[return_key]
+                        key = grammar.symbols[return_key]
                             .next
                             .expect("RuleRef should have next");
                     } else {
@@ -82,7 +85,7 @@ impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> DocumentIter<'a, T, Doc
 
                 Symbol::RuleHead { .. } | Symbol::DocHead { .. } => {
                     // Skip past head
-                    key = sequitur.symbols[key].next.expect("Head should have next");
+                    key = grammar.symbols[key].next.expect("Head should have next");
                 }
             }
         }
@@ -96,14 +99,14 @@ impl<'a, T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> Iterator for DocumentIt
         let current_key = self.current?;
 
         // Get the value
-        let value = match &self.sequitur.symbols[current_key].symbol {
+        let value = match &self.grammar.symbols[current_key].symbol {
             Symbol::Value(v) => v,
             _ => unreachable!("resolve_forward should only return Value symbols"),
         };
 
         // Move to next symbol
-        let next_key = self.sequitur.symbols[current_key].next?;
-        self.current = Self::resolve_forward(self.sequitur, next_key, &mut self.stack);
+        let next_key = self.grammar.symbols[current_key].next?;
+        self.current = Self::resolve_forward(self.grammar, next_key, &mut self.stack);
 
         Some(value)
     }
