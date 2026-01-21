@@ -164,18 +164,6 @@ mod tests {
     }
 
     #[test]
-    fn test_iter_empty_document() {
-        let mut docs = SequiturDocuments::new();
-        docs.push_to_document(1, 'a');
-        docs.push_to_document(2, 'x'); // Create second document
-
-        // Remove the value from document 1 by creating new empty document
-        let docs2 = SequiturDocuments::<char, u32>::new();
-        // Actually, empty documents aren't created automatically, so this test doesn't make sense
-        // Let's test a document with content instead
-    }
-
-    #[test]
     fn test_iter_multiple_documents() {
         let mut docs = SequiturDocuments::new();
         docs.extend_document("a", vec!['x', 'y', 'z']);

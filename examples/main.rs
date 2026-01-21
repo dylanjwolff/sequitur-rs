@@ -34,7 +34,7 @@ fn main() {
         count += 1;
 
         // Print progress every 100,000 bytes
-        if count % 100_000 == 0 {
+        if count.is_multiple_of(100_000) {
             println!("{}", count);
         }
     }
@@ -43,9 +43,8 @@ fn main() {
     let file = File::open(filename).expect("Cannot reopen file");
     let reader = BufReader::new(file);
     let mut seq_iter = seq.iter();
-    let mut verify_count = 0;
 
-    for byte_result in reader.bytes() {
+    for (verify_count, byte_result) in reader.bytes().enumerate() {
         let file_byte = byte_result.expect("Error reading file");
         let seq_byte = seq_iter.next().expect("Sequitur ended early");
 
@@ -55,8 +54,6 @@ fn main() {
                 verify_count, file_byte, seq_byte
             );
         }
-
-        verify_count += 1;
     }
 
     // Compute statistics

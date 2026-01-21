@@ -298,8 +298,8 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
                 }
 
                 // Remove digrams from index
-                for i in 0..rule_symbols.len() {
-                    self.remove_digram_from_index(rule_symbols[i]);
+                for &key in &rule_symbols {
+                    self.remove_digram_from_index(key);
                 }
 
                 // Clone symbols
@@ -345,8 +345,8 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
                 }
 
                 // Check new links
-                for i in 0..new_keys.len().saturating_sub(1) {
-                    self.check_new_links(new_keys[i]);
+                for &key in new_keys.iter().take(new_keys.len().saturating_sub(1)) {
+                    self.check_new_links(key);
                 }
                 if let Some(&last) = new_keys.last() {
                     self.check_new_links(last);

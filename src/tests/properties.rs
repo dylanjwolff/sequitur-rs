@@ -1,14 +1,14 @@
 use crate::sequitur::Sequitur;
 use crate::symbol::Symbol;
 use proptest::prelude::*;
-use std::collections::HashSet;
 
 /// Extracts all digrams from the entire grammar for testing digram uniqueness.
+#[allow(dead_code)]
 fn extract_all_digrams<T: Clone + Eq + std::hash::Hash>(seq: &Sequitur<T>) -> Vec<(usize, usize)> {
     let mut digrams = Vec::new();
 
     // Iterate through all rules
-    for (&rule_id, &head_key) in seq.rules() {
+    for (&_rule_id, &head_key) in seq.rules() {
         let mut current = seq.symbols[head_key].next;
 
         while let Some(key) = current {
@@ -35,6 +35,7 @@ fn extract_all_digrams<T: Clone + Eq + std::hash::Hash>(seq: &Sequitur<T>) -> Ve
 }
 
 /// Gets a unique identifier for a symbol for digram comparison.
+#[allow(dead_code)]
 fn get_symbol_id<T>(symbol: &Symbol<T>) -> usize {
     match symbol {
         Symbol::Value(_) => 0,  // Simplified: all values get same ID for this test
@@ -165,7 +166,7 @@ fn fuzz_no_panic() {
         // Verify basic operations don't panic
         let _ = seq.len();
         let _ = seq.is_empty();
-        let count = seq.iter().count();
+        let _count = seq.iter().count();
 
         // Roundtrip should work
         let reconstructed: Vec<u8> = seq.iter().copied().collect();
