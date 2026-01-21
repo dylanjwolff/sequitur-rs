@@ -1,7 +1,8 @@
-use crate::grammar::Grammar;
-use crate::symbol::{Symbol, SymbolNode};
+use crate::grammar::{is_sequence_start, GrammarFields, GrammarOps};
+use crate::id_gen::IdGenerator;
+use crate::symbol::{Symbol, SymbolHash, SymbolNode};
 use ahash::AHashMap as HashMap;
-use slotmap::DefaultKey;
+use slotmap::{DefaultKey, SlotMap};
 use std::hash::Hash;
 
 /// Main Sequitur data structure.
@@ -11,8 +12,17 @@ use std::hash::Hash;
 /// 1. Digram Uniqueness: No digram appears more than once
 /// 2. Rule Utility: Every rule is used at least twice
 pub struct Sequitur<T> {
-    /// Core grammar storage (shared implementation with SequiturDocuments)
-    pub(crate) grammar: Grammar<T>,
+    /// Storage for all symbols using generational indices
+    pub(crate) symbols: SlotMap<DefaultKey, SymbolNode<T>>,
+
+    /// Maps digrams to their first occurrence
+    pub(crate) digram_index: HashMap<(SymbolHash, SymbolHash), DefaultKey>,
+
+    /// Maps rule IDs to their RuleHead keys
+    pub(crate) rule_index: HashMap<u32, DefaultKey>,
+
+    /// ID generator with reuse
+    pub(crate) id_gen: IdGenerator,
 
     /// Key to the RuleTail of Rule 0 (main sequence)
     pub(crate) sequence_end: DefaultKey,
@@ -21,35 +31,53 @@ pub struct Sequitur<T> {
     length: usize,
 }
 
+// Implement GrammarOps trait for zero-cost code sharing
+impl<T> GrammarOps<T> for Sequitur<T> {
+    #[inline(always)]
+    fn fields(&mut self) -> GrammarFields<'_, T> {
+        GrammarFields {
+            symbols: &mut self.symbols,
+            digram_index: &mut self.digram_index,
+            rule_index: &mut self.rule_index,
+            id_gen: &mut self.id_gen,
+        }
+    }
+}
+
 impl<T: Hash + Eq + Clone> Sequitur<T> {
     /// Creates a new empty Sequitur instance.
     ///
     /// Initializes with Rule 0 (the main sequence).
     pub fn new() -> Self {
-        let mut grammar = Grammar::new();
+        let mut symbols = SlotMap::new();
+        let mut id_gen = IdGenerator::new();
+        let mut rule_index = HashMap::default();
 
         // Create Rule 0 (main sequence)
-        let rule_id = grammar.id_gen.get();
+        let rule_id = id_gen.get();
         assert_eq!(rule_id, 0, "First rule should have ID 0");
 
         // Create RuleTail first (will be updated with RuleHead reference)
-        let tail_key = grammar.symbols.insert(SymbolNode::new(Symbol::RuleTail));
+        let tail_key = symbols.insert(SymbolNode::new(Symbol::RuleTail));
 
         // Create RuleHead with reference to tail
-        let head_key = grammar.symbols.insert(SymbolNode::new(Symbol::RuleHead {
+        let head_key = symbols.insert(SymbolNode::new(Symbol::RuleHead {
             rule_id,
             count: 0,
             tail: tail_key,
         }));
 
         // Link them together
-        grammar.symbols[head_key].next = Some(tail_key);
-        grammar.symbols[tail_key].prev = Some(head_key);
+        symbols[head_key].next = Some(tail_key);
+        symbols[tail_key].prev = Some(head_key);
 
-        grammar.rule_index.insert(rule_id, head_key);
+        rule_index.insert(rule_id, head_key);
 
         Self {
-            grammar,
+            symbols,
+            digram_index: HashMap::default(),
+            rule_index,
+            id_gen,
             sequence_end: tail_key,
             length: 0,
         }
@@ -60,22 +88,19 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
     /// This triggers the Sequitur algorithm to maintain the grammar constraints.
     pub fn push(&mut self, value: T) {
         // Create new Value symbol
-        let new_key = self
-            .grammar
-            .symbols
-            .insert(SymbolNode::new(Symbol::Value(value)));
+        let new_key = self.symbols.insert(SymbolNode::new(Symbol::Value(value)));
 
         // Insert before sequence_end (RuleTail of Rule 0)
         let tail_key = self.sequence_end;
-        let prev_key = self.grammar.symbols[tail_key].prev;
+        let prev_key = self.symbols[tail_key].prev;
 
         // Link new symbol into the list
-        self.grammar.symbols[new_key].next = Some(tail_key);
-        self.grammar.symbols[new_key].prev = prev_key;
-        self.grammar.symbols[tail_key].prev = Some(new_key);
+        self.symbols[new_key].next = Some(tail_key);
+        self.symbols[new_key].prev = prev_key;
+        self.symbols[tail_key].prev = Some(new_key);
 
         if let Some(prev) = prev_key {
-            self.grammar.symbols[prev].next = Some(new_key);
+            self.symbols[prev].next = Some(new_key);
         }
 
         self.length += 1;
@@ -84,8 +109,8 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
         if self.length > 1 {
             if let Some(prev) = prev_key {
                 // Skip if prev is RuleHead (digrams don't start with RuleHead)
-                if !matches!(self.grammar.symbols[prev].symbol, Symbol::RuleHead { .. }) {
-                    self.grammar.link_made(prev);
+                if !is_sequence_start(&self.symbols[prev].symbol) {
+                    self.fields().link_made(prev);
                 }
             }
         }
@@ -110,18 +135,18 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
 
     /// Returns a reference to the rule index.
     pub fn rules(&self) -> &HashMap<u32, DefaultKey> {
-        &self.grammar.rule_index
+        &self.rule_index
     }
 
     /// Returns compression statistics.
     pub fn stats(&self) -> CompressionStats {
         let mut total_symbols = 0;
 
-        for &head_key in self.grammar.rule_index.values() {
+        for &head_key in self.rule_index.values() {
             // Count symbols between RuleHead and RuleTail
-            let mut current = self.grammar.symbols[head_key].next;
+            let mut current = self.symbols[head_key].next;
             while let Some(key) = current {
-                if let Some(next) = self.grammar.symbols[key].next {
+                if let Some(next) = self.symbols[key].next {
                     total_symbols += 1;
                     current = Some(next);
                 } else {
@@ -133,7 +158,7 @@ impl<T: Hash + Eq + Clone> Sequitur<T> {
         CompressionStats {
             input_length: self.length,
             grammar_symbols: total_symbols,
-            num_rules: self.grammar.rule_index.len(),
+            num_rules: self.rule_index.len(),
         }
     }
 }
@@ -216,14 +241,14 @@ mod tests {
         let rule_0_head = *seq.rules().get(&0).expect("Rule 0 should exist");
 
         // Verify structure: RuleHead -> RuleTail
-        let head_node = &seq.grammar.symbols[rule_0_head];
+        let head_node = &seq.symbols[rule_0_head];
         assert!(matches!(
             head_node.symbol,
             Symbol::RuleHead { rule_id: 0, .. }
         ));
 
         let tail_key = head_node.next.expect("Head should have next");
-        let tail_node = &seq.grammar.symbols[tail_key];
+        let tail_node = &seq.symbols[tail_key];
         assert!(matches!(tail_node.symbol, Symbol::RuleTail));
         assert_eq!(tail_key, seq.sequence_end);
     }

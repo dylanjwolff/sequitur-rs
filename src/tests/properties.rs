@@ -9,18 +9,18 @@ fn extract_all_digrams<T: Clone + Eq + std::hash::Hash>(seq: &Sequitur<T>) -> Ve
 
     // Iterate through all rules
     for (&_rule_id, &head_key) in seq.rules() {
-        let mut current = seq.grammar.symbols[head_key].next;
+        let mut current = seq.symbols[head_key].next;
 
         while let Some(key) = current {
-            if let Some(next_key) = seq.grammar.symbols[key].next {
+            if let Some(next_key) = seq.symbols[key].next {
                 // Skip RuleHead -> X and X -> RuleTail digrams
-                let is_head = matches!(seq.grammar.symbols[key].symbol, Symbol::RuleHead { .. });
-                let is_tail = matches!(seq.grammar.symbols[next_key].symbol, Symbol::RuleTail);
+                let is_head = matches!(seq.symbols[key].symbol, Symbol::RuleHead { .. });
+                let is_tail = matches!(seq.symbols[next_key].symbol, Symbol::RuleTail);
 
                 if !is_head && !is_tail {
                     // Create a representation of the digram
-                    let first_id = get_symbol_id(&seq.grammar.symbols[key].symbol);
-                    let second_id = get_symbol_id(&seq.grammar.symbols[next_key].symbol);
+                    let first_id = get_symbol_id(&seq.symbols[key].symbol);
+                    let second_id = get_symbol_id(&seq.symbols[next_key].symbol);
                     digrams.push((first_id, second_id));
                 }
 
@@ -49,7 +49,7 @@ fn get_symbol_id<T>(symbol: &Symbol<T>) -> usize {
 
 /// Gets the reference count for a rule.
 fn get_rule_count<T>(seq: &Sequitur<T>, head_key: slotmap::DefaultKey) -> u32 {
-    if let Symbol::RuleHead { count, .. } = seq.grammar.symbols[head_key].symbol {
+    if let Symbol::RuleHead { count, .. } = seq.symbols[head_key].symbol {
         count
     } else {
         0
@@ -109,9 +109,9 @@ proptest! {
 
         for (&rule_id, &head_key) in seq.rules() {
             if rule_id != 0 {
-                let first = seq.grammar.symbols[head_key].next.expect("Rule should have content");
+                let first = seq.symbols[head_key].next.expect("Rule should have content");
                 prop_assert!(
-                    !matches!(seq.grammar.symbols[first].symbol, Symbol::RuleTail),
+                    !matches!(seq.symbols[first].symbol, Symbol::RuleTail),
                     "Rule {} is empty",
                     rule_id
                 );
