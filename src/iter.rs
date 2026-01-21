@@ -1,3 +1,4 @@
+use crate::grammar::Grammar;
 use crate::sequitur::Sequitur;
 use crate::symbol::Symbol;
 use slotmap::DefaultKey;
@@ -7,7 +8,7 @@ use std::hash::Hash;
 ///
 /// Uses a stack to track rule expansion depth, matching the C++ implementation.
 pub struct SequiturIter<'a, T> {
-    sequitur: &'a Sequitur<T>,
+    grammar: &'a Grammar<T>,
     current: Option<DefaultKey>,
     stack: Vec<DefaultKey>,
 }
@@ -16,15 +17,15 @@ impl<'a, T: Hash + Eq + Clone> SequiturIter<'a, T> {
     pub(crate) fn new(sequitur: &'a Sequitur<T>) -> Self {
         // Start at Rule 0's first symbol
         let rule_0_head = *sequitur.rules().get(&0).expect("Rule 0 should exist");
-        let start = sequitur.symbols[rule_0_head]
+        let start = sequitur.grammar.symbols[rule_0_head]
             .next
             .expect("Rule 0 should have content");
 
         let mut stack = Vec::new();
-        let current = Self::resolve_forward(sequitur, start, &mut stack);
+        let current = Self::resolve_forward(&sequitur.grammar, start, &mut stack);
 
         Self {
-            sequitur,
+            grammar: &sequitur.grammar,
             current,
             stack,
         }
@@ -34,32 +35,32 @@ impl<'a, T: Hash + Eq + Clone> SequiturIter<'a, T> {
     ///
     /// Matches the C++ `resolveForward` logic.
     fn resolve_forward(
-        sequitur: &Sequitur<T>,
+        grammar: &Grammar<T>,
         key: DefaultKey,
         stack: &mut Vec<DefaultKey>,
     ) -> Option<DefaultKey> {
-        match &sequitur.symbols[key].symbol {
+        match &grammar.symbols[key].symbol {
             Symbol::Value(_) => Some(key),
 
             Symbol::RuleRef { rule_id } => {
                 // Push current position and descend into rule
                 stack.push(key);
-                let rule_head = *sequitur.rules().get(rule_id)?;
-                let rule_first = sequitur.symbols[rule_head].next?;
-                Self::resolve_forward(sequitur, rule_first, stack)
+                let rule_head = *grammar.rule_index.get(rule_id)?;
+                let rule_first = grammar.symbols[rule_head].next?;
+                Self::resolve_forward(grammar, rule_first, stack)
             }
 
             Symbol::RuleHead { .. } => {
                 // Skip past RuleHead
-                let next = sequitur.symbols[key].next?;
-                Self::resolve_forward(sequitur, next, stack)
+                let next = grammar.symbols[key].next?;
+                Self::resolve_forward(grammar, next, stack)
             }
 
             Symbol::RuleTail => {
                 // End of rule, pop stack and continue
                 if let Some(parent) = stack.pop() {
-                    let next = sequitur.symbols[parent].next?;
-                    Self::resolve_forward(sequitur, next, stack)
+                    let next = grammar.symbols[parent].next?;
+                    Self::resolve_forward(grammar, next, stack)
                 } else {
                     // End of iteration
                     None
@@ -68,8 +69,8 @@ impl<'a, T: Hash + Eq + Clone> SequiturIter<'a, T> {
 
             Symbol::DocHead { .. } => {
                 // Skip past DocHead (shouldn't appear in Rule 0, but handle defensively)
-                let next = sequitur.symbols[key].next?;
-                Self::resolve_forward(sequitur, next, stack)
+                let next = grammar.symbols[key].next?;
+                Self::resolve_forward(grammar, next, stack)
             }
 
             Symbol::DocTail => {
@@ -87,14 +88,14 @@ impl<'a, T: Hash + Eq + Clone> Iterator for SequiturIter<'a, T> {
         let current_key = self.current?;
 
         // Extract the value
-        let value = match &self.sequitur.symbols[current_key].symbol {
+        let value = match &self.grammar.symbols[current_key].symbol {
             Symbol::Value(v) => v,
             _ => unreachable!("resolve_forward should only return Value symbols"),
         };
 
         // Move to next symbol
-        let next_key = self.sequitur.symbols[current_key].next?;
-        self.current = Self::resolve_forward(self.sequitur, next_key, &mut self.stack);
+        let next_key = self.grammar.symbols[current_key].next?;
+        self.current = Self::resolve_forward(self.grammar, next_key, &mut self.stack);
 
         Some(value)
     }

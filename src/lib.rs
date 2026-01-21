@@ -28,13 +28,11 @@
 //! - Grammar size grows sub-linearly with input size for repetitive data
 //! - Memory-efficient using generational indices (SlotMap)
 
-mod digram;
 mod documents;
 mod documents_iter;
-mod documents_ops;
+mod grammar;
 mod id_gen;
 mod iter;
-mod rule;
 mod sequitur;
 mod symbol;
 

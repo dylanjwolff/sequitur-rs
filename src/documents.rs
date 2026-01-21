@@ -1,7 +1,7 @@
-use crate::id_gen::IdGenerator;
-use crate::symbol::{Symbol, SymbolHash, SymbolNode};
+use crate::grammar::Grammar;
+use crate::symbol::{Symbol, SymbolNode};
 use ahash::AHashMap as HashMap;
-use slotmap::{DefaultKey, SlotMap};
+use slotmap::DefaultKey;
 use std::hash::Hash;
 
 /// Per-document metadata tracking the document's symbol sequence.
@@ -47,17 +47,8 @@ pub(crate) struct DocumentInfo {
 /// let text2: String = docs.iter_document(&"article2".to_string()).unwrap().collect();
 /// ```
 pub struct SequiturDocuments<T, DocId> {
-    /// Storage for all symbols using generational indices
-    pub(crate) symbols: SlotMap<DefaultKey, SymbolNode<T>>,
-
-    /// Maps digrams to their first occurrence (shared across all documents)
-    pub(crate) digram_index: HashMap<(SymbolHash, SymbolHash), DefaultKey>,
-
-    /// Maps rule IDs to their RuleHead keys (shared across all documents)
-    pub(crate) rule_index: HashMap<u32, DefaultKey>,
-
-    /// ID generator with reuse for rules
-    pub(crate) id_gen: IdGenerator,
+    /// Core grammar storage (shared implementation with Sequitur)
+    pub(crate) grammar: Grammar<T>,
 
     /// Per-document sequences
     pub(crate) documents: HashMap<DocId, DocumentInfo>,
@@ -70,10 +61,7 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
     /// as documents are added.
     pub fn new() -> Self {
         Self {
-            symbols: SlotMap::new(),
-            digram_index: HashMap::default(),
-            rule_index: HashMap::default(),
-            id_gen: IdGenerator::new(),
+            grammar: Grammar::new(),
             documents: HashMap::default(),
         }
     }
@@ -106,20 +94,23 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
         }
 
         // Create new Value symbol
-        let new_key = self.symbols.insert(SymbolNode::new(Symbol::Value(value)));
+        let new_key = self
+            .grammar
+            .symbols
+            .insert(SymbolNode::new(Symbol::Value(value)));
 
         // Get document info
         let doc_info = self.documents.get_mut(&doc_id).unwrap();
         let tail_key = doc_info.tail;
-        let prev_key = self.symbols[tail_key].prev;
+        let prev_key = self.grammar.symbols[tail_key].prev;
 
         // Link new symbol into the list before DocTail
-        self.symbols[new_key].next = Some(tail_key);
-        self.symbols[new_key].prev = prev_key;
-        self.symbols[tail_key].prev = Some(new_key);
+        self.grammar.symbols[new_key].next = Some(tail_key);
+        self.grammar.symbols[new_key].prev = prev_key;
+        self.grammar.symbols[tail_key].prev = Some(new_key);
 
         if let Some(prev) = prev_key {
-            self.symbols[prev].next = Some(new_key);
+            self.grammar.symbols[prev].next = Some(new_key);
         }
 
         doc_info.length += 1;
@@ -128,8 +119,8 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
         if doc_info.length > 1 {
             if let Some(prev) = prev_key {
                 // Skip if prev is DocHead (digrams don't start with DocHead)
-                if !matches!(self.symbols[prev].symbol, Symbol::DocHead { .. }) {
-                    self.link_made(prev);
+                if !matches!(self.grammar.symbols[prev].symbol, Symbol::DocHead { .. }) {
+                    self.grammar.link_made(prev);
                 }
             }
         }
@@ -173,7 +164,7 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
 
     /// Returns a reference to the rule index (shared across all documents).
     pub fn rules(&self) -> &HashMap<u32, DefaultKey> {
-        &self.rule_index
+        &self.grammar.rule_index
     }
 
     /// Returns compression statistics for a specific document.
@@ -184,13 +175,13 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
 
         // Count symbols in this document's sequence
         let mut doc_symbols = 0;
-        let mut current = self.symbols[doc_info.head].next;
+        let mut current = self.grammar.symbols[doc_info.head].next;
         while let Some(key) = current {
-            match &self.symbols[key].symbol {
+            match &self.grammar.symbols[key].symbol {
                 Symbol::DocTail => break,
                 _ => {
                     doc_symbols += 1;
-                    current = self.symbols[key].next;
+                    current = self.grammar.symbols[key].next;
                 }
             }
         }
@@ -210,23 +201,23 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
         for doc_info in self.documents.values() {
             total_input_length += doc_info.length;
 
-            let mut current = self.symbols[doc_info.head].next;
+            let mut current = self.grammar.symbols[doc_info.head].next;
             while let Some(key) = current {
-                match &self.symbols[key].symbol {
+                match &self.grammar.symbols[key].symbol {
                     Symbol::DocTail => break,
                     _ => {
                         total_grammar_symbols += 1;
-                        current = self.symbols[key].next;
+                        current = self.grammar.symbols[key].next;
                     }
                 }
             }
         }
 
         // Count symbols in all rules
-        for &head_key in self.rule_index.values() {
-            let mut current = self.symbols[head_key].next;
+        for &head_key in self.grammar.rule_index.values() {
+            let mut current = self.grammar.symbols[head_key].next;
             while let Some(key) = current {
-                if let Some(next) = self.symbols[key].next {
+                if let Some(next) = self.grammar.symbols[key].next {
                     total_grammar_symbols += 1;
                     current = Some(next);
                 } else {
@@ -238,7 +229,7 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
         OverallStats {
             total_input_length,
             total_grammar_symbols,
-            num_rules: self.rule_index.len(),
+            num_rules: self.grammar.rule_index.len(),
             num_documents: self.documents.len(),
         }
     }
@@ -246,16 +237,20 @@ impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId>
     /// Creates a new empty document.
     fn create_document(&mut self, doc_id: DocId) {
         // Create DocTail first
-        let tail_key = self.symbols.insert(SymbolNode::new(Symbol::DocTail));
+        let tail_key = self
+            .grammar
+            .symbols
+            .insert(SymbolNode::new(Symbol::DocTail));
 
         // Create DocHead with reference to tail
         let head_key = self
+            .grammar
             .symbols
             .insert(SymbolNode::new(Symbol::DocHead { tail: tail_key }));
 
         // Link them together
-        self.symbols[head_key].next = Some(tail_key);
-        self.symbols[tail_key].prev = Some(head_key);
+        self.grammar.symbols[head_key].next = Some(tail_key);
+        self.grammar.symbols[tail_key].prev = Some(head_key);
 
         self.documents.insert(
             doc_id,
@@ -315,37 +310,6 @@ impl OverallStats {
 impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> Default for SequiturDocuments<T, DocId> {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// Import the link_made logic from sequitur.rs
-// We'll need to add a trait or move the logic to a shared module
-// For now, we'll implement it directly here
-impl<T: Hash + Eq + Clone, DocId: Hash + Eq + Clone> SequiturDocuments<T, DocId> {
-    /// Core algorithm: Called when two symbols are linked.
-    ///
-    /// This is identical to Sequitur::link_made() but operates on the shared grammar.
-    pub(crate) fn link_made(&mut self, first_key: DefaultKey) {
-        assert!(
-            self.symbols[first_key].next.is_some(),
-            "link_made called on symbol without next"
-        );
-
-        let second_key = self.symbols[first_key].next.unwrap();
-
-        // Try to find existing digram or add to index
-        if let Some(match_key) = self.find_and_add_digram(first_key, second_key) {
-            // Check if the match is a complete rule
-            if let Some(rule_head_key) = self.get_complete_rule(match_key) {
-                // Replace with existing rule
-                let new_key = self.swap_for_existing_rule(first_key, rule_head_key);
-                self.check_new_links(new_key);
-            } else {
-                // Create new rule from both occurrences
-                let (loc1, loc2) = self.swap_for_new_rule(first_key, match_key);
-                self.check_new_links_pair(loc1, loc2);
-            }
-        }
     }
 }
 
