@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use sequitur_rs::{Sequitur, SequiturDocuments, SequiturDocumentsRle, SequiturRle};
+use sequitur_rs::{Repair, Sequitur, SequiturDocuments, SequiturDocumentsRle, SequiturRle};
 
 /// Generate repetitive text data
 fn generate_repetitive_text(size: usize) -> String {
@@ -546,6 +546,276 @@ fn print_compression_stats(c: &mut Criterion) {
     group.finish();
 }
 
+// =============================================================================
+// RePair benchmarks
+// =============================================================================
+
+/// Benchmark RePair vs Sequitur on repetitive text
+fn bench_repair_repetitive(c: &mut Criterion) {
+    let sizes = [1_000, 10_000, 50_000];
+    let mut group = c.benchmark_group("repair_repetitive");
+
+    for size in sizes.iter() {
+        let data = generate_repetitive_text(*size);
+
+        group.bench_with_input(BenchmarkId::new("Sequitur", size), &data, |b, data| {
+            b.iter(|| {
+                let mut seq = Sequitur::new();
+                seq.extend(black_box(data.chars()));
+                black_box(seq)
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("Repair", size), &data, |b, data| {
+            b.iter(|| {
+                let mut repair = Repair::new();
+                repair.extend(black_box(data.chars()));
+                repair.compress();
+                black_box(repair)
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark RePair vs Sequitur on source code-like data
+fn bench_repair_source_code(c: &mut Criterion) {
+    let sizes = [1_000, 10_000, 50_000];
+    let mut group = c.benchmark_group("repair_source_code");
+
+    for size in sizes.iter() {
+        let data = generate_source_code(*size);
+
+        group.bench_with_input(BenchmarkId::new("Sequitur", size), &data, |b, data| {
+            b.iter(|| {
+                let mut seq = Sequitur::new();
+                seq.extend(black_box(data.chars()));
+                black_box(seq)
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("Repair", size), &data, |b, data| {
+            b.iter(|| {
+                let mut repair = Repair::new();
+                repair.extend(black_box(data.chars()));
+                repair.compress();
+                black_box(repair)
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark RePair vs Sequitur on low-repetition data
+fn bench_repair_low_repetition(c: &mut Criterion) {
+    let sizes = [1_000, 10_000, 50_000];
+    let mut group = c.benchmark_group("repair_low_repetition");
+
+    for size in sizes.iter() {
+        let data = generate_low_repetition(*size);
+
+        group.bench_with_input(BenchmarkId::new("Sequitur", size), &data, |b, data| {
+            b.iter(|| {
+                let mut seq = Sequitur::new();
+                seq.extend(black_box(data.chars()));
+                black_box(seq)
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("Repair", size), &data, |b, data| {
+            b.iter(|| {
+                let mut repair = Repair::new();
+                repair.extend(black_box(data.chars()));
+                repair.compress();
+                black_box(repair)
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark RePair vs Sequitur on (ab)^k pattern
+fn bench_repair_ab_pattern(c: &mut Criterion) {
+    let ks = [100, 1_000, 5_000];
+    let mut group = c.benchmark_group("repair_ab_pattern");
+
+    for k in ks.iter() {
+        let data = generate_ab_pattern(*k);
+
+        group.bench_with_input(BenchmarkId::new("Sequitur", k), &data, |b, data| {
+            b.iter(|| {
+                let mut seq = Sequitur::new();
+                seq.extend(black_box(data.iter().copied()));
+                black_box(seq)
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("Repair", k), &data, |b, data| {
+            b.iter(|| {
+                let mut repair = Repair::new();
+                repair.extend(black_box(data.iter().copied()));
+                repair.compress();
+                black_box(repair)
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark RePair iteration (reconstruction)
+fn bench_repair_iteration(c: &mut Criterion) {
+    let sizes = [1_000, 10_000, 50_000];
+    let mut group = c.benchmark_group("repair_iteration");
+
+    for size in sizes.iter() {
+        let data = generate_repetitive_text(*size);
+
+        // Prepare pre-built structures
+        let mut seq = Sequitur::new();
+        seq.extend(data.chars());
+
+        let mut repair = Repair::new();
+        repair.extend(data.chars());
+        repair.compress();
+
+        group.bench_with_input(BenchmarkId::new("Sequitur", size), &seq, |b, seq| {
+            b.iter(|| {
+                let count: usize = black_box(seq.iter().count());
+                black_box(count)
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("Repair", size), &repair, |b, repair| {
+            b.iter(|| {
+                let count: usize = black_box(repair.iter().count());
+                black_box(count)
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Print compression statistics including RePair
+fn print_repair_compression_stats(c: &mut Criterion) {
+    let mut group = c.benchmark_group("repair_compression_stats");
+    group.sample_size(10);
+
+    // Print header
+    eprintln!("\n{:=^100}", " Sequitur vs RePair Compression Statistics ");
+    eprintln!(
+        "{:<25} {:>10} {:>12} {:>12} {:>12} {:>12}",
+        "Dataset", "Input", "Seq Rules", "Seq Syms", "Rep Rules", "Rep Syms"
+    );
+    eprintln!("{:-<100}", "");
+
+    // Repetitive text
+    for size in [1_000, 10_000, 50_000] {
+        let data = generate_repetitive_text(size);
+
+        let mut seq = Sequitur::new();
+        seq.extend(data.chars());
+        let seq_stats = seq.stats();
+
+        let mut repair = Repair::new();
+        repair.extend(data.chars());
+        repair.compress();
+        let repair_stats = repair.stats();
+
+        eprintln!(
+            "{:<25} {:>10} {:>12} {:>12} {:>12} {:>12}",
+            format!("repetitive_text_{}", size),
+            size,
+            seq_stats.num_rules,
+            seq_stats.grammar_symbols,
+            repair_stats.num_rules,
+            repair_stats.grammar_symbols
+        );
+    }
+
+    // Source code
+    for size in [1_000, 10_000, 50_000] {
+        let data = generate_source_code(size);
+
+        let mut seq = Sequitur::new();
+        seq.extend(data.chars());
+        let seq_stats = seq.stats();
+
+        let mut repair = Repair::new();
+        repair.extend(data.chars());
+        repair.compress();
+        let repair_stats = repair.stats();
+
+        eprintln!(
+            "{:<25} {:>10} {:>12} {:>12} {:>12} {:>12}",
+            format!("source_code_{}", size),
+            size,
+            seq_stats.num_rules,
+            seq_stats.grammar_symbols,
+            repair_stats.num_rules,
+            repair_stats.grammar_symbols
+        );
+    }
+
+    // (ab)^k pattern
+    for k in [100, 1_000, 5_000] {
+        let data = generate_ab_pattern(k);
+
+        let mut seq = Sequitur::new();
+        seq.extend(data.iter().copied());
+        let seq_stats = seq.stats();
+
+        let mut repair = Repair::new();
+        repair.extend(data.iter().copied());
+        repair.compress();
+        let repair_stats = repair.stats();
+
+        eprintln!(
+            "{:<25} {:>10} {:>12} {:>12} {:>12} {:>12}",
+            format!("ab_pattern_{}", k),
+            k * 2,
+            seq_stats.num_rules,
+            seq_stats.grammar_symbols,
+            repair_stats.num_rules,
+            repair_stats.grammar_symbols
+        );
+    }
+
+    // Low repetition
+    for size in [1_000, 10_000, 50_000] {
+        let data = generate_low_repetition(size);
+
+        let mut seq = Sequitur::new();
+        seq.extend(data.chars());
+        let seq_stats = seq.stats();
+
+        let mut repair = Repair::new();
+        repair.extend(data.chars());
+        repair.compress();
+        let repair_stats = repair.stats();
+
+        eprintln!(
+            "{:<25} {:>10} {:>12} {:>12} {:>12} {:>12}",
+            format!("low_repetition_{}", size),
+            size,
+            seq_stats.num_rules,
+            seq_stats.grammar_symbols,
+            repair_stats.num_rules,
+            repair_stats.grammar_symbols
+        );
+    }
+
+    eprintln!("{:=<100}\n", "");
+
+    // Dummy benchmark to satisfy criterion
+    group.bench_function("repair_stats_printed", |b| b.iter(|| black_box(1)));
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_sequitur_repetitive,
@@ -559,7 +829,14 @@ criterion_group!(
     bench_rle_repetitive_text,
     bench_rle_iteration,
     bench_rle_documents,
+    // RePair benchmarks
+    bench_repair_repetitive,
+    bench_repair_source_code,
+    bench_repair_low_repetition,
+    bench_repair_ab_pattern,
+    bench_repair_iteration,
     // Statistics comparison
     print_compression_stats,
+    print_repair_compression_stats,
 );
 criterion_main!(benches);
