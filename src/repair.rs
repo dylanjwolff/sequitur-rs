@@ -3,8 +3,10 @@
 //! RePair is a greedy grammar-based compression algorithm that repeatedly
 //! replaces the most frequent pair of adjacent symbols with a new rule.
 //!
-//! Unlike Sequitur which processes input incrementally, RePair is a batch
-//! algorithm that operates on the complete input sequence.
+//! This implementation achieves O(n) time and space complexity by using:
+//! - A hash table to track pair frequencies
+//! - A bucket-based priority queue for O(1) amortized max-frequency access
+//! - Occurrence threading to find all instances of a pair without rescanning
 //!
 //! # Example
 //!
@@ -24,34 +26,9 @@ use crate::id_gen::IdGenerator;
 use crate::symbol::{Symbol, SymbolNode};
 use ahash::AHashMap as HashMap;
 use slotmap::{DefaultKey, SlotMap};
-use std::collections::BinaryHeap;
 use std::hash::Hash;
 
-/// A pair of adjacent symbols with their frequency count.
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct PairRecord {
-    /// Frequency of this pair
-    frequency: u32,
-    /// Hash of the first symbol
-    first_symbol_id: PairSymbolId,
-    /// Hash of the second symbol
-    second_symbol_id: PairSymbolId,
-}
-
-impl Ord for PairRecord {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Higher frequency = higher priority
-        self.frequency.cmp(&other.frequency)
-    }
-}
-
-impl PartialOrd for PairRecord {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-/// Identifier for symbols in the pair index (either terminal value index or rule ID).
+/// Identifier for symbols in the pair index.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 enum PairSymbolId {
     /// Terminal symbol with index into values_dedup
@@ -60,10 +37,74 @@ enum PairSymbolId {
     RuleRef(u32),
 }
 
+/// A record tracking a unique pair and its occurrences.
+#[derive(Debug)]
+struct PairRecord {
+    /// Number of occurrences of this pair
+    frequency: u32,
+    /// Head of the linked list of occurrences (position of first symbol in pair)
+    first_occurrence: Option<DefaultKey>,
+    /// Tail of the linked list (for O(1) append)
+    last_occurrence: Option<DefaultKey>,
+}
+
+/// Threading info for each position - links occurrences of the same pair.
+#[derive(Debug, Clone, Copy, Default)]
+struct PairThread {
+    /// Next occurrence of the same (this, next) pair
+    next_same_pair: Option<DefaultKey>,
+    /// Previous occurrence of the same (this, next) pair
+    prev_same_pair: Option<DefaultKey>,
+}
+
+/// Bucket-based priority queue for O(1) amortized max access.
+#[derive(Debug)]
+struct PriorityQueue {
+    /// Buckets indexed by frequency, each containing list of pair keys
+    buckets: Vec<Vec<(PairSymbolId, PairSymbolId)>>,
+    /// Current maximum non-empty bucket
+    max_bucket: usize,
+}
+
+impl PriorityQueue {
+    fn new(max_frequency: usize) -> Self {
+        Self {
+            buckets: vec![Vec::new(); max_frequency + 1],
+            max_bucket: 0,
+        }
+    }
+
+    fn insert(&mut self, pair: (PairSymbolId, PairSymbolId), frequency: u32) {
+        let freq = frequency as usize;
+        if freq >= self.buckets.len() {
+            self.buckets.resize(freq + 1, Vec::new());
+        }
+        self.buckets[freq].push(pair);
+        if freq > self.max_bucket {
+            self.max_bucket = freq;
+        }
+    }
+
+    fn pop_max(&mut self) -> Option<(PairSymbolId, PairSymbolId)> {
+        while self.max_bucket > 0 {
+            if let Some(pair) = self.buckets[self.max_bucket].pop() {
+                return Some(pair);
+            }
+            self.max_bucket -= 1;
+        }
+        // Check bucket 0 as well (though pairs with freq < 2 aren't useful)
+        self.buckets[0].pop()
+    }
+
+    #[allow(dead_code)]
+    fn is_empty(&self) -> bool {
+        self.max_bucket == 0 && self.buckets[0].is_empty()
+    }
+}
+
 /// Main RePair data structure.
 ///
-/// Compresses input sequences using the RePair algorithm, which repeatedly
-/// replaces the most frequent pair with a new rule.
+/// Compresses input sequences using the RePair algorithm with O(n) complexity.
 pub struct Repair<T> {
     /// Symbol storage (doubly-linked list nodes)
     pub(crate) symbols: SlotMap<DefaultKey, SymbolNode<T>>,
@@ -154,8 +195,6 @@ impl<T: Hash + Eq + Clone> Repair<T> {
     }
 
     /// Adds a value to the sequence.
-    ///
-    /// Must be called before `compress()`.
     pub fn push(&mut self, value: T) {
         assert!(
             !self.compressed,
@@ -185,8 +224,6 @@ impl<T: Hash + Eq + Clone> Repair<T> {
     }
 
     /// Extends the sequence with multiple values.
-    ///
-    /// Must be called before `compress()`.
     pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for value in iter {
             self.push(value);
@@ -195,81 +232,150 @@ impl<T: Hash + Eq + Clone> Repair<T> {
 
     /// Performs RePair compression on the sequence.
     ///
-    /// This replaces frequently occurring pairs with rules until no pair
-    /// occurs more than once.
+    /// This implementation uses O(n) time and space:
+    /// - Hash table for pair → record mapping
+    /// - Bucket-based priority queue for max-frequency access
+    /// - Occurrence threading for efficient pair replacement
     pub fn compress(&mut self) {
         if self.compressed || self.length < 2 {
             self.compressed = true;
             return;
         }
 
-        loop {
-            // Count all pairs
-            let pair_counts = self.count_pairs();
+        // Phase 1: Initialize data structures - O(n)
+        let (mut pair_records, mut pair_threads) = self.initialize_pair_structures();
 
-            // Find the most frequent pair
-            let best_pair = pair_counts.into_iter().max();
+        // Build priority queue from pair records
+        let max_freq = pair_records
+            .values()
+            .map(|r| r.frequency)
+            .max()
+            .unwrap_or(0);
+        let mut pq = PriorityQueue::new(max_freq as usize);
 
-            match best_pair {
-                Some(record) if record.frequency >= 2 => {
-                    // Replace all occurrences of this pair with a new rule
-                    self.replace_pair(record.first_symbol_id, record.second_symbol_id);
-                }
-                _ => break, // No pair occurs twice or more
+        for (&pair, record) in &pair_records {
+            if record.frequency >= 2 {
+                pq.insert(pair, record.frequency);
             }
+        }
+
+        // Phase 2: Main compression loop - O(n) total
+        while let Some(pair) = pq.pop_max() {
+            // Get current record (may have been updated)
+            let Some(record) = pair_records.get(&pair) else {
+                continue;
+            };
+
+            // Skip if frequency dropped below 2
+            if record.frequency < 2 {
+                continue;
+            }
+
+            let first_occurrence = match record.first_occurrence {
+                Some(k) => k,
+                None => continue,
+            };
+
+            // Create new rule for this pair
+            let rule_id = self.create_rule_for_pair(pair);
+
+            // Replace all occurrences, updating adjacent pairs
+            self.replace_all_occurrences(
+                pair,
+                rule_id,
+                first_occurrence,
+                &mut pair_records,
+                &mut pair_threads,
+                &mut pq,
+            );
         }
 
         self.compressed = true;
     }
 
-    /// Counts all pairs in Rule 0 (main sequence only).
-    fn count_pairs(&self) -> BinaryHeap<PairRecord> {
-        let mut pair_counts: HashMap<(PairSymbolId, PairSymbolId), u32> = HashMap::default();
+    /// Initialize pair records and threading structures - O(n).
+    fn initialize_pair_structures(
+        &self,
+    ) -> (
+        HashMap<(PairSymbolId, PairSymbolId), PairRecord>,
+        HashMap<DefaultKey, PairThread>,
+    ) {
+        let mut pair_records: HashMap<(PairSymbolId, PairSymbolId), PairRecord> =
+            HashMap::default();
+        let mut pair_threads: HashMap<DefaultKey, PairThread> = HashMap::default();
 
-        // Only count pairs in Rule 0 (the main sequence)
+        // Scan Rule 0 and build pair records
         let head_key = *self.rule_index.get(&0).expect("Rule 0 should exist");
         let mut current = self.symbols[head_key].next;
 
         while let Some(key) = current {
-            let next = self.symbols[key].next;
+            let next_key = match self.symbols[key].next {
+                Some(n) => n,
+                None => break,
+            };
 
-            if let Some(next_key) = next {
-                // Skip if either symbol is a sentinel
-                let is_first_sentinel = matches!(
-                    self.symbols[key].symbol,
-                    Symbol::RuleHead { .. } | Symbol::RuleTail
-                );
-                let is_second_sentinel = matches!(
-                    self.symbols[next_key].symbol,
-                    Symbol::RuleHead { .. } | Symbol::RuleTail
-                );
-
-                if !is_first_sentinel && !is_second_sentinel {
-                    if let (Some(first_id), Some(second_id)) =
-                        (self.get_symbol_id(key), self.get_symbol_id(next_key))
-                    {
-                        *pair_counts.entry((first_id, second_id)).or_insert(0) += 1;
-                    }
-                }
+            // Skip sentinels
+            if self.is_sentinel(key) || self.is_sentinel(next_key) {
+                current = Some(next_key);
+                continue;
             }
 
-            current = next;
+            let first_id = match self.get_symbol_id(key) {
+                Some(id) => id,
+                None => {
+                    current = Some(next_key);
+                    continue;
+                }
+            };
+            let second_id = match self.get_symbol_id(next_key) {
+                Some(id) => id,
+                None => {
+                    current = Some(next_key);
+                    continue;
+                }
+            };
+
+            let pair = (first_id, second_id);
+
+            // Update or create record
+            let record = pair_records.entry(pair).or_insert(PairRecord {
+                frequency: 0,
+                first_occurrence: None,
+                last_occurrence: None,
+            });
+
+            // Thread this occurrence - O(1) using last_occurrence
+            let mut thread = PairThread::default();
+
+            if let Some(last) = record.last_occurrence {
+                // Link this occurrence after last
+                if let Some(t) = pair_threads.get_mut(&last) {
+                    t.next_same_pair = Some(key);
+                }
+                thread.prev_same_pair = Some(last);
+            } else {
+                record.first_occurrence = Some(key);
+            }
+            record.last_occurrence = Some(key);
+
+            pair_threads.insert(key, thread);
+            record.frequency += 1;
+
+            current = Some(next_key);
         }
 
-        // Convert to priority queue
-        pair_counts
-            .into_iter()
-            .map(|((first, second), freq)| PairRecord {
-                frequency: freq,
-                first_symbol_id: first,
-                second_symbol_id: second,
-            })
-            .collect()
+        (pair_records, pair_threads)
     }
 
-    /// Replaces all occurrences of a pair with a new rule.
-    fn replace_pair(&mut self, first_id: PairSymbolId, second_id: PairSymbolId) {
-        // Create a new rule
+    fn is_sentinel(&self, key: DefaultKey) -> bool {
+        matches!(
+            self.symbols[key].symbol,
+            Symbol::RuleHead { .. } | Symbol::RuleTail
+        )
+    }
+
+    /// Create a new rule for a pair and return its ID.
+    fn create_rule_for_pair(&mut self, pair: (PairSymbolId, PairSymbolId)) -> u32 {
         let rule_id = self.id_gen.get();
 
         // Create RuleTail
@@ -282,13 +388,13 @@ impl<T: Hash + Eq + Clone> Repair<T> {
             tail: tail_key,
         }));
 
-        // Create the rule body (the pair of symbols)
+        // Create the rule body
         let rule_first = self
             .symbols
-            .insert(SymbolNode::new(self.id_to_symbol(first_id)));
+            .insert(SymbolNode::new(self.id_to_symbol(pair.0)));
         let rule_second = self
             .symbols
-            .insert(SymbolNode::new(self.id_to_symbol(second_id)));
+            .insert(SymbolNode::new(self.id_to_symbol(pair.1)));
 
         // Link rule structure: head -> first -> second -> tail
         self.symbols[head_key].next = Some(rule_first);
@@ -299,77 +405,192 @@ impl<T: Hash + Eq + Clone> Repair<T> {
         self.symbols[tail_key].prev = Some(rule_second);
 
         self.rule_index.insert(rule_id, head_key);
+        rule_id
+    }
 
-        // Find and replace all occurrences of this pair
-        let mut count = 0;
-        let locations = self.find_pair_locations(first_id, second_id);
+    /// Replace all occurrences of a pair using the thread structure.
+    fn replace_all_occurrences(
+        &mut self,
+        pair: (PairSymbolId, PairSymbolId),
+        rule_id: u32,
+        first_occurrence: DefaultKey,
+        pair_records: &mut HashMap<(PairSymbolId, PairSymbolId), PairRecord>,
+        pair_threads: &mut HashMap<DefaultKey, PairThread>,
+        pq: &mut PriorityQueue,
+    ) {
+        let mut count = 0u32;
+        let mut current_occ = Some(first_occurrence);
 
-        for first_key in locations {
-            // Verify the pair is still valid (may have been affected by previous replacement)
+        while let Some(first_key) = current_occ {
+            // Get next occurrence before we potentially invalidate the thread
+            let next_occ = pair_threads.get(&first_key).and_then(|t| t.next_same_pair);
+
+            // Verify this occurrence is still valid
             if !self.symbols.contains_key(first_key) {
+                current_occ = next_occ;
                 continue;
             }
 
-            let Some(second_key) = self.symbols[first_key].next else {
-                continue;
+            let second_key = match self.symbols[first_key].next {
+                Some(k) if self.symbols.contains_key(k) => k,
+                _ => {
+                    current_occ = next_occ;
+                    continue;
+                }
             };
 
-            if !self.symbols.contains_key(second_key) {
+            // Verify symbols still match the pair
+            let current_first = self.get_symbol_id(first_key);
+            let current_second = self.get_symbol_id(second_key);
+
+            if current_first != Some(pair.0) || current_second != Some(pair.1) {
+                current_occ = next_occ;
                 continue;
             }
 
-            // Verify the symbols still match
-            let current_first_id = self.get_symbol_id(first_key);
-            let current_second_id = self.get_symbol_id(second_key);
+            // Get adjacent positions for updating neighbor pairs
+            let before_key = self.symbols[first_key].prev;
+            let after_key = self.symbols[second_key].next;
 
-            if current_first_id != Some(first_id) || current_second_id != Some(second_id) {
-                continue;
+            // Decrease frequency of adjacent pairs (before, first) and (second, after)
+            if let Some(before) = before_key {
+                if !self.is_sentinel(before) {
+                    if let (Some(bid), Some(fid)) =
+                        (self.get_symbol_id(before), self.get_symbol_id(first_key))
+                    {
+                        Self::decrease_pair_frequency(pair_records, (bid, fid));
+                    }
+                }
             }
 
-            // Skip if second is a sentinel
-            if matches!(
-                self.symbols[second_key].symbol,
-                Symbol::RuleTail | Symbol::RuleHead { .. }
-            ) {
-                continue;
+            if let Some(after) = after_key {
+                if !self.is_sentinel(after) {
+                    if let (Some(sid), Some(aid)) =
+                        (self.get_symbol_id(second_key), self.get_symbol_id(after))
+                    {
+                        Self::decrease_pair_frequency(pair_records, (sid, aid));
+                    }
+                }
             }
 
-            // Replace the pair with a RuleRef
-            let before = self.symbols[first_key].prev;
-            let after = self.symbols[second_key].next;
-
+            // Create RuleRef to replace the pair
             let rule_ref_key = self
                 .symbols
                 .insert(SymbolNode::new(Symbol::RuleRef { rule_id }));
 
-            self.symbols[rule_ref_key].prev = before;
-            self.symbols[rule_ref_key].next = after;
+            // Link into sequence
+            self.symbols[rule_ref_key].prev = before_key;
+            self.symbols[rule_ref_key].next = after_key;
 
-            if let Some(prev) = before {
+            if let Some(prev) = before_key {
                 self.symbols[prev].next = Some(rule_ref_key);
             }
-            if let Some(next) = after {
+            if let Some(next) = after_key {
                 self.symbols[next].prev = Some(rule_ref_key);
             }
 
-            // Remove the old symbols
+            // Remove old symbols
             self.symbols.remove(first_key);
             self.symbols.remove(second_key);
+            pair_threads.remove(&first_key);
+
+            // Increase frequency of new adjacent pairs and add to PQ if needed
+            let new_id = PairSymbolId::RuleRef(rule_id);
+
+            if let Some(before) = before_key {
+                if !self.is_sentinel(before) {
+                    if let Some(bid) = self.get_symbol_id(before) {
+                        let new_pair = (bid, new_id);
+                        let freq = Self::increase_pair_frequency(
+                            pair_records,
+                            pair_threads,
+                            new_pair,
+                            before,
+                        );
+                        if freq == 2 {
+                            pq.insert(new_pair, freq);
+                        }
+                    }
+                }
+            }
+
+            if let Some(after) = after_key {
+                if !self.is_sentinel(after) {
+                    if let Some(aid) = self.get_symbol_id(after) {
+                        let new_pair = (new_id, aid);
+                        let freq = Self::increase_pair_frequency(
+                            pair_records,
+                            pair_threads,
+                            new_pair,
+                            rule_ref_key,
+                        );
+                        if freq == 2 {
+                            pq.insert(new_pair, freq);
+                        }
+                    }
+                }
+            }
 
             count += 1;
+            current_occ = next_occ;
         }
 
         // Update rule count
-        if let Symbol::RuleHead {
-            rule_id: rid, tail, ..
-        } = self.symbols[head_key].symbol
-        {
-            self.symbols[head_key].symbol = Symbol::RuleHead {
-                rule_id: rid,
-                count,
-                tail,
-            };
+        if let Some(&head_key) = self.rule_index.get(&rule_id) {
+            if let Symbol::RuleHead {
+                rule_id: rid, tail, ..
+            } = self.symbols[head_key].symbol
+            {
+                self.symbols[head_key].symbol = Symbol::RuleHead {
+                    rule_id: rid,
+                    count,
+                    tail,
+                };
+            }
         }
+
+        // Remove the pair record
+        pair_records.remove(&pair);
+    }
+
+    fn decrease_pair_frequency(
+        pair_records: &mut HashMap<(PairSymbolId, PairSymbolId), PairRecord>,
+        pair: (PairSymbolId, PairSymbolId),
+    ) {
+        if let Some(record) = pair_records.get_mut(&pair) {
+            record.frequency = record.frequency.saturating_sub(1);
+        }
+    }
+
+    fn increase_pair_frequency(
+        pair_records: &mut HashMap<(PairSymbolId, PairSymbolId), PairRecord>,
+        pair_threads: &mut HashMap<DefaultKey, PairThread>,
+        pair: (PairSymbolId, PairSymbolId),
+        position: DefaultKey,
+    ) -> u32 {
+        let record = pair_records.entry(pair).or_insert(PairRecord {
+            frequency: 0,
+            first_occurrence: None,
+            last_occurrence: None,
+        });
+
+        // Thread this occurrence - O(1) using last_occurrence
+        let mut thread = PairThread::default();
+
+        if let Some(last) = record.last_occurrence {
+            // Link after last
+            if let Some(t) = pair_threads.get_mut(&last) {
+                t.next_same_pair = Some(position);
+            }
+            thread.prev_same_pair = Some(last);
+        } else {
+            record.first_occurrence = Some(position);
+        }
+        record.last_occurrence = Some(position);
+
+        pair_threads.insert(position, thread);
+        record.frequency += 1;
+        record.frequency
     }
 
     /// Converts a PairSymbolId back to a Symbol.
@@ -380,48 +601,6 @@ impl<T: Hash + Eq + Clone> Repair<T> {
             }
             PairSymbolId::RuleRef(rule_id) => Symbol::RuleRef { rule_id },
         }
-    }
-
-    /// Finds all locations where a pair occurs in Rule 0 (main sequence only).
-    fn find_pair_locations(
-        &self,
-        first_id: PairSymbolId,
-        second_id: PairSymbolId,
-    ) -> Vec<DefaultKey> {
-        let mut locations = Vec::new();
-
-        // Only search in Rule 0 (the main sequence)
-        let head_key = *self.rule_index.get(&0).expect("Rule 0 should exist");
-        let mut current = self.symbols[head_key].next;
-
-        while let Some(key) = current {
-            let next = self.symbols[key].next;
-
-            if let Some(next_key) = next {
-                let is_first_sentinel = matches!(
-                    self.symbols[key].symbol,
-                    Symbol::RuleHead { .. } | Symbol::RuleTail
-                );
-                let is_second_sentinel = matches!(
-                    self.symbols[next_key].symbol,
-                    Symbol::RuleHead { .. } | Symbol::RuleTail
-                );
-
-                if !is_first_sentinel && !is_second_sentinel {
-                    if let (Some(fid), Some(sid)) =
-                        (self.get_symbol_id(key), self.get_symbol_id(next_key))
-                    {
-                        if fid == first_id && sid == second_id {
-                            locations.push(key);
-                        }
-                    }
-                }
-            }
-
-            current = next;
-        }
-
-        locations
     }
 
     /// Returns the number of values added to the sequence.
