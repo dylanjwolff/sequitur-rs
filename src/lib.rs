@@ -1,6 +1,10 @@
 //! # Sequitur - Context-Free Grammar Compression
 //!
-//! A Rust implementation of the Sequitur algorithm for incremental grammar compression.
+//! A Rust implementation of grammar-based compression algorithms:
+//! - **Sequitur**: Incremental grammar compression
+//! - **RePair**: Batch grammar compression
+//!
+//! ## Sequitur
 //!
 //! Sequitur maintains a context-free grammar that compresses input sequences while
 //! enforcing two constraints:
@@ -46,9 +50,27 @@
 //! assert_eq!(result.len(), 100);
 //! ```
 //!
+//! ## RePair
+//!
+//! [`Repair`] implements the RePair algorithm, which is a batch compression algorithm
+//! that repeatedly replaces the most frequent pair of adjacent symbols with a new rule.
+//!
+//! ```
+//! use sequitur_rs::Repair;
+//!
+//! let mut repair = Repair::new();
+//! repair.extend("abcabcabcabc".chars());
+//! repair.compress();
+//!
+//! // Reconstructs the original sequence
+//! let reconstructed: String = repair.iter().collect();
+//! assert_eq!(reconstructed, "abcabcabcabc");
+//! ```
+//!
 //! ## Performance
 //!
-//! - O(1) amortized time per symbol added
+//! - **Sequitur**: O(1) amortized time per symbol added (incremental)
+//! - **RePair**: O(n²) worst case (batch, but often better compression)
 //! - Grammar size grows sub-linearly with input size for repetitive data
 //! - Memory-efficient using generational indices (SlotMap)
 
@@ -68,6 +90,10 @@ mod rle_iter;
 mod rle_sequitur;
 mod rle_symbol;
 
+// RePair grammar compression
+mod repair;
+mod repair_iter;
+
 #[cfg(test)]
 mod tests;
 
@@ -81,3 +107,7 @@ pub use rle_documents::{RleDocumentStats, RleOverallStats, SequiturDocumentsRle}
 pub use rle_documents_iter::RleDocumentIter;
 pub use rle_iter::RleSequiturIter;
 pub use rle_sequitur::{RleCompressionStats, SequiturRle};
+
+// RePair exports
+pub use repair::{Repair, RepairStats};
+pub use repair_iter::RepairIter;
